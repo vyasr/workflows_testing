@@ -164,21 +164,30 @@ jobs:
                       }
                     }
 
-                    // If Release field not found, query project for field ID
+                    // Query project for Release field details (type and options)
+                    let releaseFieldType = null;
+                    let releaseFieldOptions = [];
+
                     if (!releaseFieldId) {
                       console.log('    Release field not found on item, querying project fields');
+                    }
 
-                      const projectFieldsQuery = `
-                        query($projectId: ID!) {
-                          node(id: $projectId) {
-                            ... on ProjectV2 {
-                              fields(first: 20) {
-                                nodes {
-                                  ... on ProjectV2Field {
-                                    id
-                                    name
-                                  }
-                                  ... on ProjectV2SingleSelectField {
+                    const projectFieldsQuery = `
+                      query($projectId: ID!) {
+                        node(id: $projectId) {
+                          ... on ProjectV2 {
+                            fields(first: 20) {
+                              nodes {
+                                ... on ProjectV2Field {
+                                  id
+                                  name
+                                  dataType
+                                }
+                                ... on ProjectV2SingleSelectField {
+                                  id
+                                  name
+                                  dataType
+                                  options {
                                     id
                                     name
                                   }
@@ -187,18 +196,26 @@ jobs:
                             }
                           }
                         }
-                      `;
+                      }
+                    `;
 
-                      const projectFieldsResult = await github.graphql(projectFieldsQuery, {
-                        projectId: projectId
-                      });
+                    const projectFieldsResult = await github.graphql(projectFieldsQuery, {
+                      projectId: projectId
+                    });
 
-                      const fields = projectFieldsResult.node?.fields?.nodes || [];
-                      const releaseField = fields.find(f => f.name === 'Release');
+                    const fields = projectFieldsResult.node?.fields?.nodes || [];
+                    const releaseField = fields.find(f => f.name === 'Release');
 
-                      if (releaseField) {
+                    if (releaseField) {
+                      if (!releaseFieldId) {
                         releaseFieldId = releaseField.id;
                         console.log(`    Found Release field ID from project: ${releaseFieldId}`);
+                      }
+                      releaseFieldType = releaseField.dataType;
+                      releaseFieldOptions = releaseField.options || [];
+                      console.log(`    Release field type: ${releaseFieldType}`);
+                      if (releaseFieldOptions.length > 0) {
+                        console.log(`    Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
                       }
                     }
 
@@ -242,30 +259,75 @@ jobs:
 
                     console.log(`    Updating Release field to: "${expectedReleaseValue}"`);
 
-                    // Update the Release field
-                    const updateMutation = `
-                      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
-                        updateProjectV2ItemFieldValue(
-                          input: {
-                            projectId: $projectId
-                            itemId: $itemId
-                            fieldId: $fieldId
-                            value: { text: $value }
-                          }
-                        ) {
-                          projectV2Item {
-                            id
+                    // Update the Release field based on field type
+                    if (releaseFieldType === 'SINGLE_SELECT') {
+                      // For single select fields, find the option ID
+                      const option = releaseFieldOptions.find(o => o.name === expectedReleaseValue);
+
+                      if (!option) {
+                        console.log(`    ERROR: Option "${expectedReleaseValue}" not found in Release field options`);
+                        console.log(`    Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
+
+                        await github.rest.issues.createComment({
+                          owner,
+                          repo,
+                          issue_number: issueNumber,
+                          body: `⚠️ **Release Automation Error**: Cannot set Release to "${expectedReleaseValue}" - this option does not exist in the project.\n\nAvailable options: ${releaseFieldOptions.map(o => o.name).join(', ')}\n\nPlease add "${expectedReleaseValue}" as an option to the Release field in your project.`
+                        });
+                        continue;
+                      }
+
+                      console.log(`    Using option ID: ${option.id} for "${expectedReleaseValue}"`);
+
+                      const updateMutation = `
+                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                          updateProjectV2ItemFieldValue(
+                            input: {
+                              projectId: $projectId
+                              itemId: $itemId
+                              fieldId: $fieldId
+                              value: { singleSelectOptionId: $optionId }
+                            }
+                          ) {
+                            projectV2Item {
+                              id
+                            }
                           }
                         }
-                      }
-                    `;
+                      `;
 
-                    await github.graphql(updateMutation, {
-                      projectId: projectId,
-                      itemId: itemId,
-                      fieldId: releaseFieldId,
-                      value: expectedReleaseValue
-                    });
+                      await github.graphql(updateMutation, {
+                        projectId: projectId,
+                        itemId: itemId,
+                        fieldId: releaseFieldId,
+                        optionId: option.id
+                      });
+                    } else {
+                      // For text fields, use text value
+                      const updateMutation = `
+                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                          updateProjectV2ItemFieldValue(
+                            input: {
+                              projectId: $projectId
+                              itemId: $itemId
+                              fieldId: $fieldId
+                              value: { text: $value }
+                            }
+                          ) {
+                            projectV2Item {
+                              id
+                            }
+                          }
+                        }
+                      `;
+
+                      await github.graphql(updateMutation, {
+                        projectId: projectId,
+                        itemId: itemId,
+                        fieldId: releaseFieldId,
+                        value: expectedReleaseValue
+                      });
+                    }
 
                     console.log(`    ✓ Successfully updated Release field to "${expectedReleaseValue}"`);
                     updatedCount++;
