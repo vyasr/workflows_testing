@@ -3,9 +3,9 @@ name: Issue Release Field Automation
 on:
   issues:
     types: [opened, edited]
-  # Also trigger when issue is added to or moved within a project
-  project_card:
-    types: [created, moved]
+  # Note: Projects V2 don't emit repository-level events when fields change.
+  # For Priority changes made directly in the project view, consider adding
+  # a scheduled workflow (see issue-release-scheduled.yml example)
 
 jobs:
   update-release-field:

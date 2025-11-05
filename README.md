@@ -17,9 +17,23 @@ Automatically sets the Release field on issues based on their Priority field:
 
 **Triggers:**
 - When an issue is opened or edited
-- When an issue is added to or moved within a GitHub Project
 
-#### 2. PR Release Automation (`.github/workflows/pr-release-automation.yml`)
+**Note:** Since GitHub Projects V2 don't emit repository-level events when fields are changed directly in the project view, this workflow only runs when the issue itself is edited. For Priority changes made directly in the project, see the scheduled workflow below.
+
+#### 2. Issue Release Scheduled Sync (`.github/workflows/issue-release-scheduled.yml`)
+
+Periodically checks all open issues and syncs their Release field based on Priority. This catches Priority changes made directly in the GitHub Project view.
+
+- Runs every hour on the hour
+- Only updates issues where Release field doesn't match expected value based on Priority
+- Adds comments only when updates are made
+- Can be manually triggered via GitHub Actions UI for immediate sync
+
+**Triggers:**
+- Schedule: Every hour (`0 * * * *`)
+- Manual: `workflow_dispatch` (can be triggered manually from Actions tab)
+
+#### 3. PR Release Automation (`.github/workflows/pr-release-automation.yml`)
 
 Automatically sets the Release field on pull requests based on the VERSION file in the PR's base branch.
 
