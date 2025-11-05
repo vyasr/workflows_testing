@@ -1,0 +1,224 @@
+name: PR Release Field Automation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  update-release-field:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Get release version and update PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const baseBranch = context.payload.pull_request.base.ref;
+
+            console.log(`Processing PR #${prNumber} (base: ${baseBranch})`);
+
+            try {
+              // Read VERSION file from base branch (already checked out)
+              const fs = require('fs');
+              const versionContent = fs.readFileSync('VERSION', 'utf8').trim();
+              const versionParts = versionContent.split('.');
+
+              if (versionParts.length < 2) {
+                throw new Error(`Invalid VERSION format: ${versionContent}. Expected at least 2 segments.`);
+              }
+
+              const releaseVersion = `${versionParts[0]}.${versionParts[1]}`;
+              console.log(`Release version from VERSION file: ${releaseVersion} (from ${versionContent})`);
+
+              // Get the PR's node ID
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber
+              });
+
+              const prNodeId = pr.node_id;
+              console.log(`PR node ID: ${prNodeId}`);
+
+              // Query to get project items for this PR
+              const projectItemsQuery = `
+                query($nodeId: ID!) {
+                  node(id: $nodeId) {
+                    ... on PullRequest {
+                      projectItems(first: 10) {
+                        nodes {
+                          id
+                          project {
+                            id
+                            title
+                          }
+                          fieldValues(first: 20) {
+                            nodes {
+                              ... on ProjectV2ItemFieldTextValue {
+                                text
+                                field {
+                                  ... on ProjectV2Field {
+                                    id
+                                    name
+                                  }
+                                }
+                              }
+                              ... on ProjectV2ItemFieldSingleSelectValue {
+                                name
+                                field {
+                                  ... on ProjectV2SingleSelectField {
+                                    id
+                                    name
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+
+              const projectItemsResult = await github.graphql(projectItemsQuery, {
+                nodeId: prNodeId
+              });
+
+              const projectItems = projectItemsResult.node?.projectItems?.nodes || [];
+
+              if (projectItems.length === 0) {
+                console.log('PR is not in any project, skipping');
+                return;
+              }
+
+              // Process each project the PR is in
+              for (const projectItem of projectItems) {
+                const projectId = projectItem.project.id;
+                const projectTitle = projectItem.project.title;
+                const itemId = projectItem.id;
+
+                console.log(`Processing project: ${projectTitle}`);
+
+                // Find Release field
+                let releaseFieldId = null;
+
+                for (const fieldValue of projectItem.fieldValues.nodes) {
+                  if (fieldValue.field?.name === 'Release') {
+                    releaseFieldId = fieldValue.field.id;
+                    console.log(`Found Release field ID: ${releaseFieldId}`);
+                    break;
+                  }
+                }
+
+                // If Release field not found on item, query project for field
+                if (!releaseFieldId) {
+                  console.log('Release field not found on item, querying project fields');
+
+                  const projectFieldsQuery = `
+                    query($projectId: ID!) {
+                      node(id: $projectId) {
+                        ... on ProjectV2 {
+                          fields(first: 20) {
+                            nodes {
+                              ... on ProjectV2Field {
+                                id
+                                name
+                              }
+                              ... on ProjectV2SingleSelectField {
+                                id
+                                name
+                                options {
+                                  id
+                                  name
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  `;
+
+                  const projectFieldsResult = await github.graphql(projectFieldsQuery, {
+                    projectId: projectId
+                  });
+
+                  const fields = projectFieldsResult.node?.fields?.nodes || [];
+                  const releaseField = fields.find(f => f.name === 'Release');
+
+                  if (releaseField) {
+                    releaseFieldId = releaseField.id;
+                    console.log(`Found Release field ID from project: ${releaseFieldId}`);
+                  }
+                }
+
+                if (!releaseFieldId) {
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    body: `⚠️ **Release Automation**: Could not find Release field in project "${projectTitle}". Please ensure the project has a Release field configured.`
+                  });
+                  continue;
+                }
+
+                // Update the Release field
+                const updateMutation = `
+                  mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                    updateProjectV2ItemFieldValue(
+                      input: {
+                        projectId: $projectId
+                        itemId: $itemId
+                        fieldId: $fieldId
+                        value: { text: $value }
+                      }
+                    ) {
+                      projectV2Item {
+                        id
+                      }
+                    }
+                  }
+                `;
+
+                await github.graphql(updateMutation, {
+                  projectId: projectId,
+                  itemId: itemId,
+                  fieldId: releaseFieldId,
+                  value: releaseVersion
+                });
+
+                console.log(`Successfully updated Release field to "${releaseVersion}" in project "${projectTitle}"`);
+
+                // Add a success comment
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: `✅ **Release Automation**: Release field automatically set to **${releaseVersion}** based on VERSION file in base branch \`${baseBranch}\` in project "${projectTitle}".`
+                });
+              }
+
+            } catch (error) {
+              console.error('Error updating release field:', error);
+
+              // Add error comment
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: `❌ **Release Automation Error**: Failed to update Release field.\n\n\`\`\`\n${error.message}\n\`\`\`\n\nPlease ensure:\n- The VERSION file exists in the base branch\n- The PR is added to a GitHub Project\n- The project has a Release field\n- The PROJECT_TOKEN secret has appropriate permissions`
+              });
+            }
