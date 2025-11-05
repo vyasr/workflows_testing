@@ -63,139 +63,45 @@ jobs:
               const currentRelease = `${versionParts[0]}.${versionParts[1]}`;
               console.log(`Current release from VERSION: ${currentRelease}`);
 
-              // Get all open issues in the repository
-              const { data: issues } = await github.rest.issues.listForRepo({
-                owner,
-                repo,
-                state: 'open',
-                per_page: 100
-              });
+              // Query the target project directly
+              console.log(`Querying project: ${TARGET_PROJECT_ID}`);
 
-              console.log(`Found ${issues.length} open issues to check`);
-
-              let updatedCount = 0;
-              let skippedCount = 0;
-              let errorCount = 0;
-
-              for (const issue of issues) {
-                // Skip pull requests (they have their own workflow)
-                if (issue.pull_request) {
-                  continue;
-                }
-
-                const issueNumber = issue.number;
-                const issueNodeId = issue.node_id;
-
-                console.log(`\nChecking issue #${issueNumber}`);
-
-                try {
-                  // Query to get project items for this issue
-                  const projectItemsQuery = `
-                    query($nodeId: ID!) {
-                      node(id: $nodeId) {
-                        ... on Issue {
-                          projectItems(first: 10) {
-                            nodes {
-                              id
-                              project {
-                                id
-                                title
-                              }
-                              fieldValues(first: 20) {
-                                nodes {
-                                  ... on ProjectV2ItemFieldSingleSelectValue {
-                                    name
-                                    field {
-                                      ... on ProjectV2SingleSelectField {
-                                        id
-                                        name
-                                      }
-                                    }
-                                  }
-                                  ... on ProjectV2ItemFieldTextValue {
-                                    text
-                                    field {
-                                      ... on ProjectV2Field {
-                                        id
-                                        name
-                                      }
-                                    }
-                                  }
-                                }
+              const projectQuery = `
+                query($projectId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      title
+                      items(first: 100) {
+                        nodes {
+                          id
+                          content {
+                            __typename
+                            ... on Issue {
+                              number
+                              repository {
+                                owner { login }
+                                name
                               }
                             }
+                            ... on PullRequest {
+                              number
+                            }
                           }
-                        }
-                      }
-                    }
-                  `;
-
-                  const projectItemsResult = await github.graphql(projectItemsQuery, {
-                    nodeId: issueNodeId
-                  });
-
-                  const projectItems = projectItemsResult.node?.projectItems?.nodes || [];
-
-                  if (projectItems.length === 0) {
-                    console.log(`Issue #${issueNumber} is not in any project, skipping`);
-                    skippedCount++;
-                    continue;
-                  }
-
-                  // Process each project the issue is in
-                  for (const projectItem of projectItems) {
-                    const projectId = projectItem.project.id;
-                    const projectTitle = projectItem.project.title;
-                    const itemId = projectItem.id;
-
-                    // Skip if not the target project
-                    if (projectId !== TARGET_PROJECT_ID) {
-                      continue;
-                    }
-
-                    console.log(`  Processing project: ${projectTitle}`);
-
-                    // Find Priority and Release field values
-                    let priorityValue = null;
-                    let currentReleaseValue = null;
-                    let releaseFieldId = null;
-
-                    for (const fieldValue of projectItem.fieldValues.nodes) {
-                      if (fieldValue.field?.name === 'Priority') {
-                        priorityValue = fieldValue.name;
-                        console.log(`    Found Priority: ${priorityValue}`);
-                      }
-                      if (fieldValue.field?.name === 'Release') {
-                        releaseFieldId = fieldValue.field.id;
-                        currentReleaseValue = fieldValue.text || fieldValue.name;
-                        console.log(`    Found Release: ${currentReleaseValue}`);
-                      }
-                    }
-
-                    // Query project for Release field details (type and options)
-                    let releaseFieldType = null;
-                    let releaseFieldOptions = [];
-
-                    if (!releaseFieldId) {
-                      console.log('    Release field not found on item, querying project fields');
-                    }
-
-                    const projectFieldsQuery = `
-                      query($projectId: ID!) {
-                        node(id: $projectId) {
-                          ... on ProjectV2 {
-                            fields(first: 20) {
-                              nodes {
-                                ... on ProjectV2Field {
-                                  id
-                                  name
-                                  dataType
+                          fieldValues(first: 20) {
+                            nodes {
+                              ... on ProjectV2ItemFieldSingleSelectValue {
+                                name
+                                field {
+                                  ... on ProjectV2SingleSelectField {
+                                    id
+                                    name
+                                  }
                                 }
-                                ... on ProjectV2SingleSelectField {
-                                  id
-                                  name
-                                  dataType
-                                  options {
+                              }
+                              ... on ProjectV2ItemFieldTextValue {
+                                text
+                                field {
+                                  ... on ProjectV2Field {
                                     id
                                     name
                                   }
@@ -205,141 +111,216 @@ jobs:
                           }
                         }
                       }
+                      fields(first: 20) {
+                        nodes {
+                          ... on ProjectV2Field {
+                            id
+                            name
+                            dataType
+                          }
+                          ... on ProjectV2SingleSelectField {
+                            id
+                            name
+                            dataType
+                            options {
+                              id
+                              name
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              `;
+
+              const projectResult = await github.graphql(projectQuery, {
+                projectId: TARGET_PROJECT_ID
+              });
+
+              const project = projectResult.node;
+              if (!project) {
+                throw new Error(`Project with ID ${TARGET_PROJECT_ID} not found`);
+              }
+
+              const projectTitle = project.title;
+              const projectItems = project.items?.nodes || [];
+              const projectFields = project.fields?.nodes || [];
+
+              console.log(`Found project: ${projectTitle}`);
+              console.log(`Found ${projectItems.length} items in project`);
+
+              // Get Release field information
+              const releaseField = projectFields.find(f => f.name === 'Release');
+              if (!releaseField) {
+                throw new Error(`Release field not found in project "${projectTitle}"`);
+              }
+
+              const releaseFieldId = releaseField.id;
+              const releaseFieldType = releaseField.dataType;
+              const releaseFieldOptions = releaseField.options || [];
+              console.log(`Release field type: ${releaseFieldType}`);
+
+              let updatedCount = 0;
+              let skippedCount = 0;
+              let errorCount = 0;
+
+              // Process each item in the project
+              for (const projectItem of projectItems) {
+                const itemId = projectItem.id;
+                const content = projectItem.content;
+
+                // Skip if no content (item was deleted)
+                if (!content) {
+                  continue;
+                }
+
+                // Skip pull requests (they have their own workflow)
+                if (content.__typename === 'PullRequest') {
+                  continue;
+                }
+
+                // Only process issues
+                if (content.__typename !== 'Issue') {
+                  continue;
+                }
+
+                const issueNumber = content.number;
+                const issueOwner = content.repository.owner.login;
+                const issueRepo = content.repository.name;
+
+                // Skip if issue is not from this repository
+                if (issueOwner !== owner || issueRepo !== repo) {
+                  continue;
+                }
+
+                console.log(`\nChecking issue #${issueNumber}`);
+
+                try {
+
+                  // Find Priority and Release field values
+                  let priorityValue = null;
+                  let currentReleaseValue = null;
+
+                  for (const fieldValue of projectItem.fieldValues.nodes) {
+                    if (fieldValue.field?.name === 'Priority') {
+                      priorityValue = fieldValue.name;
+                      console.log(`  Found Priority: ${priorityValue}`);
+                    }
+                    if (fieldValue.field?.name === 'Release') {
+                      currentReleaseValue = fieldValue.text || fieldValue.name;
+                      console.log(`  Found Release: ${currentReleaseValue}`);
+                    }
+                  }
+
+                  // Skip if no Priority value
+                  if (!priorityValue) {
+                    console.log(`  No Priority value found, skipping`);
+                    skippedCount++;
+                    continue;
+                  }
+
+                  // Store current priority for this issue
+                  const cacheKey = `${TARGET_PROJECT_ID}:${issueNumber}`;
+                  currentPriorities[cacheKey] = priorityValue;
+
+                  // Check if Priority has changed since last run
+                  const previousPriority = previousPriorities[cacheKey];
+                  const priorityChanged = previousPriority !== priorityValue;
+
+                  if (!priorityChanged) {
+                    console.log(`  Priority unchanged (${priorityValue}), skipping Release update (preserving manual changes)`);
+                    continue;
+                  }
+
+                  console.log(`  Priority changed: "${previousPriority || '(new)'}" → "${priorityValue}"`);
+
+                  // Determine what the release value should be based on priority
+                  let expectedReleaseValue;
+                  if (priorityValue === 'P0' || priorityValue === 'P1') {
+                    expectedReleaseValue = currentRelease;
+                  } else if (priorityValue.match(/^P[2-9]$/) || priorityValue.match(/^P\d{2,}$/)) {
+                    expectedReleaseValue = 'Backlog';
+                  } else {
+                    console.log(`  Unknown priority format: ${priorityValue}, skipping`);
+                    continue;
+                  }
+
+                  console.log(`  Updating Release field to: "${expectedReleaseValue}"`);
+
+                  // Update the Release field based on field type
+                  if (releaseFieldType === 'SINGLE_SELECT') {
+                    // For single select fields, find the option ID
+                    const option = releaseFieldOptions.find(o => o.name === expectedReleaseValue);
+
+                    if (!option) {
+                      console.log(`  ERROR: Option "${expectedReleaseValue}" not found in Release field options`);
+                      console.log(`  Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
+
+                      await github.rest.issues.createComment({
+                        owner,
+                        repo,
+                        issue_number: issueNumber,
+                        body: `⚠️ **Release Automation Error**: Cannot set Release to "${expectedReleaseValue}" - this option does not exist in the project.\n\nAvailable options: ${releaseFieldOptions.map(o => o.name).join(', ')}\n\nPlease add "${expectedReleaseValue}" as an option to the Release field in your project.`
+                      });
+                      errorCount++;
+                      continue;
+                    }
+
+                    console.log(`  Using option ID: ${option.id} for "${expectedReleaseValue}"`);
+
+                    const updateMutation = `
+                      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                        updateProjectV2ItemFieldValue(
+                          input: {
+                            projectId: $projectId
+                            itemId: $itemId
+                            fieldId: $fieldId
+                            value: { singleSelectOptionId: $optionId }
+                          }
+                        ) {
+                          projectV2Item {
+                            id
+                          }
+                        }
+                      }
                     `;
 
-                    const projectFieldsResult = await github.graphql(projectFieldsQuery, {
-                      projectId: projectId
+                    await github.graphql(updateMutation, {
+                      projectId: TARGET_PROJECT_ID,
+                      itemId: itemId,
+                      fieldId: releaseFieldId,
+                      optionId: option.id
                     });
-
-                    const fields = projectFieldsResult.node?.fields?.nodes || [];
-                    const releaseField = fields.find(f => f.name === 'Release');
-
-                    if (releaseField) {
-                      if (!releaseFieldId) {
-                        releaseFieldId = releaseField.id;
-                        console.log(`    Found Release field ID from project: ${releaseFieldId}`);
-                      }
-                      releaseFieldType = releaseField.dataType;
-                      releaseFieldOptions = releaseField.options || [];
-                      console.log(`    Release field type: ${releaseFieldType}`);
-                      if (releaseFieldOptions.length > 0) {
-                        console.log(`    Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
-                      }
-                    }
-
-                    // Skip if no Priority value
-                    if (!priorityValue) {
-                      console.log(`    No Priority value found, skipping`);
-                      continue;
-                    }
-
-                    // Store current priority for this issue
-                    const cacheKey = `${projectId}:${issueNumber}`;
-                    currentPriorities[cacheKey] = priorityValue;
-
-                    // Skip if no Release field
-                    if (!releaseFieldId) {
-                      console.log(`    No Release field found in project, skipping`);
-                      continue;
-                    }
-
-                    // Check if Priority has changed since last run
-                    const previousPriority = previousPriorities[cacheKey];
-                    const priorityChanged = previousPriority !== priorityValue;
-
-                    if (!priorityChanged) {
-                      console.log(`    Priority unchanged (${priorityValue}), skipping Release update (preserving manual changes)`);
-                      continue;
-                    }
-
-                    console.log(`    Priority changed: "${previousPriority || '(new)'}" → "${priorityValue}"`);
-
-                    // Determine what the release value should be based on priority
-                    let expectedReleaseValue;
-                    if (priorityValue === 'P0' || priorityValue === 'P1') {
-                      expectedReleaseValue = currentRelease;
-                    } else if (priorityValue.match(/^P[2-9]$/) || priorityValue.match(/^P\d{2,}$/)) {
-                      expectedReleaseValue = 'Backlog';
-                    } else {
-                      console.log(`    Unknown priority format: ${priorityValue}, skipping`);
-                      continue;
-                    }
-
-                    console.log(`    Updating Release field to: "${expectedReleaseValue}"`);
-
-                    // Update the Release field based on field type
-                    if (releaseFieldType === 'SINGLE_SELECT') {
-                      // For single select fields, find the option ID
-                      const option = releaseFieldOptions.find(o => o.name === expectedReleaseValue);
-
-                      if (!option) {
-                        console.log(`    ERROR: Option "${expectedReleaseValue}" not found in Release field options`);
-                        console.log(`    Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
-
-                        await github.rest.issues.createComment({
-                          owner,
-                          repo,
-                          issue_number: issueNumber,
-                          body: `⚠️ **Release Automation Error**: Cannot set Release to "${expectedReleaseValue}" - this option does not exist in the project.\n\nAvailable options: ${releaseFieldOptions.map(o => o.name).join(', ')}\n\nPlease add "${expectedReleaseValue}" as an option to the Release field in your project.`
-                        });
-                        continue;
-                      }
-
-                      console.log(`    Using option ID: ${option.id} for "${expectedReleaseValue}"`);
-
-                      const updateMutation = `
-                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                          updateProjectV2ItemFieldValue(
-                            input: {
-                              projectId: $projectId
-                              itemId: $itemId
-                              fieldId: $fieldId
-                              value: { singleSelectOptionId: $optionId }
-                            }
-                          ) {
-                            projectV2Item {
-                              id
-                            }
+                  } else {
+                    // For text fields, use text value
+                    const updateMutation = `
+                      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
+                        updateProjectV2ItemFieldValue(
+                          input: {
+                            projectId: $projectId
+                            itemId: $itemId
+                            fieldId: $fieldId
+                            value: { text: $value }
+                          }
+                        ) {
+                          projectV2Item {
+                            id
                           }
                         }
-                      `;
+                      }
+                    `;
 
-                      await github.graphql(updateMutation, {
-                        projectId: projectId,
-                        itemId: itemId,
-                        fieldId: releaseFieldId,
-                        optionId: option.id
-                      });
-                    } else {
-                      // For text fields, use text value
-                      const updateMutation = `
-                        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
-                          updateProjectV2ItemFieldValue(
-                            input: {
-                              projectId: $projectId
-                              itemId: $itemId
-                              fieldId: $fieldId
-                              value: { text: $value }
-                            }
-                          ) {
-                            projectV2Item {
-                              id
-                            }
-                          }
-                        }
-                      `;
-
-                      await github.graphql(updateMutation, {
-                        projectId: projectId,
-                        itemId: itemId,
-                        fieldId: releaseFieldId,
-                        value: expectedReleaseValue
-                      });
-                    }
-
-                    console.log(`    ✓ Successfully updated Release field to "${expectedReleaseValue}"`);
-                    updatedCount++;
+                    await github.graphql(updateMutation, {
+                      projectId: TARGET_PROJECT_ID,
+                      itemId: itemId,
+                      fieldId: releaseFieldId,
+                      value: expectedReleaseValue
+                    });
                   }
+
+                  console.log(`  ✓ Successfully updated Release field to "${expectedReleaseValue}"`);
+                  updatedCount++;
 
                 } catch (error) {
                   console.error(`Error processing issue #${issueNumber}:`, error.message);
@@ -358,9 +339,9 @@ jobs:
 
               // Summary
               console.log('\n=== Sync Summary ===');
-              console.log(`Total open issues checked: ${issues.length}`);
+              console.log(`Total items in project: ${projectItems.length}`);
               console.log(`Issues updated: ${updatedCount}`);
-              console.log(`Issues skipped (not in project or no Priority): ${skippedCount}`);
+              console.log(`Issues skipped (no Priority or unchanged): ${skippedCount}`);
               console.log(`Errors encountered: ${errorCount}`);
 
             } catch (error) {
