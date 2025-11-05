@@ -237,9 +237,9 @@ jobs:
 
                   // Determine what the release value should be based on priority
                   let expectedReleaseValue;
-                  if (priorityValue === 'P0' || priorityValue === 'P1') {
+                  if (priorityValue === '0' || priorityValue === '1') {
                     expectedReleaseValue = currentRelease;
-                  } else if (priorityValue.match(/^P[2-9]$/) || priorityValue.match(/^P\d{2,}$/)) {
+                  } else if (priorityValue.match(/^[2-9]$/) || priorityValue.match(/^\d{2,}$/)) {
                     expectedReleaseValue = 'Backlog';
                   } else {
                     console.log(`  Unknown priority format: ${priorityValue}, skipping`);

@@ -211,12 +211,12 @@ jobs:
 
                 // Determine the release value based on priority
                 let releaseValue;
-                if (priorityValue === 'P0' || priorityValue === 'P1') {
+                if (priorityValue === '0' || priorityValue === '1') {
                   releaseValue = currentRelease;
                   console.log(`Priority is ${priorityValue}, setting release to ${releaseValue}`);
-                } else if (priorityValue.match(/^P[2-9]$/) || priorityValue.match(/^P\d{2,}$/)) {
+                } else if (priorityValue.match(/^[2-9]$/) || priorityValue.match(/^\d{2,}$/)) {
                   releaseValue = 'Backlog';
-                  console.log(`Priority is ${priorityValue} (P2 or higher), setting release to Backlog`);
+                  console.log(`Priority is ${priorityValue} (2 or higher), setting release to Backlog`);
                 } else {
                   console.log(`Unknown priority format: ${priorityValue}, skipping`);
                   continue;

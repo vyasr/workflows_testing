@@ -12,8 +12,8 @@ This repository includes GitHub Action workflows that automatically manage the R
 
 Automatically sets the Release field on issues based on their Priority field:
 
-- **P0 or P1**: Release field set to current release (from VERSION file, e.g., `25.12`)
-- **P2 or higher**: Release field set to `Backlog`
+- **0 or 1**: Release field set to current release (from VERSION file, e.g., `25.12`)
+- **2 or higher**: Release field set to `Backlog`
 
 **Triggers:**
 - When an issue is opened or edited
@@ -76,7 +76,7 @@ Automatically sets the Release field on pull requests based on the VERSION file 
 Your GitHub Project must have the following fields:
 
 1. **Priority** (Single select field)
-   - Options: `P0`, `P1`, `P2`, `P3`, etc.
+   - Options: `0`, `1`, `2`, `3`, etc.
    - Used to determine release assignment for issues
 
 2. **Release** (Text field or Single select field)
@@ -104,9 +104,9 @@ The VERSION file contains a 3-segment version (e.g., `25.12.00`), but the Releas
 
 ```
 Priority → Release Mapping:
-├─ P0 → Current version (e.g., 25.12)
-├─ P1 → Current version (e.g., 25.12)
-└─ P2+ → Backlog
+├─ 0 → Current version (e.g., 25.12)
+├─ 1 → Current version (e.g., 25.12)
+└─ 2+ → Backlog
 ```
 
 #### PR Release Logic
