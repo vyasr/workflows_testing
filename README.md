@@ -8,40 +8,33 @@ This repository includes GitHub Action workflows that automatically manage the R
 
 ### Workflows
 
-#### 1. Issue Release Automation (`.github/workflows/issue-release-automation.yml`)
+#### 1. Issue Release Scheduled Sync (`.github/workflows/issue-release-scheduled.yml`)
 
-Automatically sets the Release field on issues based on their Priority field:
-
-- **0 or 1**: Release field set to current release (from VERSION file, e.g., `25.12`)
-- **2 or higher**: Release field set to `Backlog`
-
-**Triggers:**
-- When an issue is opened or edited
-
-**Note:** Since GitHub Projects V2 don't emit repository-level events when fields are changed directly in the project view, this workflow only runs when the issue itself is edited. For Priority changes made directly in the project, see the scheduled workflow below.
-
-#### 2. Issue Release Scheduled Sync (`.github/workflows/issue-release-scheduled.yml`)
-
-Periodically checks all open issues and syncs their Release field based on Priority changes. This catches Priority changes made directly in the GitHub Project view.
+Periodically syncs the Release field on issues based on Priority changes.
 
 - Runs every 10 minutes
 - **Only updates Release when Priority actually changes** (not just when they don't match)
+- Handles both new issues and Priority changes
 - Preserves manual Release field updates - won't overwrite them unless Priority changes again
 - Uses GitHub Actions cache to track previous Priority values
-- Adds comments only when updates are made
 - Can be manually triggered via GitHub Actions UI for immediate sync
+
+**Priority Mapping:**
+- **0 or 1**: Release field set to current release (from VERSION file, e.g., `25.12`)
+- **2 or higher**: Release field set to `Backlog`
 
 **Triggers:**
 - Schedule: Every 10 minutes (`*/10 * * * *`)
 - Manual: `workflow_dispatch` (can be triggered manually from Actions tab)
 
 **How it works:**
-1. Caches Priority values from each run
-2. On next run, compares current Priority to cached Priority
-3. Only updates Release if Priority has changed since last run
-4. This allows you to manually override Release values - they won't be overwritten unless you change Priority again
+1. Queries the target project directly for all issues
+2. Caches Priority values from each run
+3. On next run, compares current Priority to cached Priority
+4. Only updates Release if Priority has changed since last run (or is a new issue)
+5. This allows you to manually override Release values - they won't be overwritten unless you change Priority again
 
-#### 3. PR Release Automation (`.github/workflows/pr-release-automation.yml`)
+#### 2. PR Release Automation (`.github/workflows/pr-release-automation.yml`)
 
 Automatically sets the Release field on pull requests based on the VERSION file in the PR's base branch.
 
