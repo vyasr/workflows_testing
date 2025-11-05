@@ -27,6 +27,9 @@ jobs:
             const repo = context.repo.repo;
             const baseBranch = context.payload.pull_request.base.ref;
 
+            // Only operate on this specific project
+            const TARGET_PROJECT_ID = 'PVT_kwHOABd4dc4BHWeu';
+
             console.log(`Processing PR #${prNumber} (base: ${baseBranch})`);
 
             try {
@@ -109,6 +112,12 @@ jobs:
                 const projectId = projectItem.project.id;
                 const projectTitle = projectItem.project.title;
                 const itemId = projectItem.id;
+
+                // Skip if not the target project
+                if (projectId !== TARGET_PROJECT_ID) {
+                  console.log(`Skipping project: ${projectTitle} (ID: ${projectId})`);
+                  continue;
+                }
 
                 console.log(`Processing project: ${projectTitle}`);
 
