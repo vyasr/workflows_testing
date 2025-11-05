@@ -242,76 +242,49 @@ jobs:
 
                   console.log(`  Updating Release field to: "${expectedReleaseValue}"`);
 
-                  // Update the Release field based on field type
-                  if (releaseFieldType === 'SINGLE_SELECT') {
-                    // For single select fields, find the option ID
-                    const option = releaseFieldOptions.find(o => o.name === expectedReleaseValue);
+                  // Find the option ID for the expected release value
+                  const option = releaseFieldOptions.find(o => o.name === expectedReleaseValue);
 
-                    if (!option) {
-                      console.log(`  ERROR: Option "${expectedReleaseValue}" not found in Release field options`);
-                      console.log(`  Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
+                  if (!option) {
+                    console.log(`  ERROR: Option "${expectedReleaseValue}" not found in Release field options`);
+                    console.log(`  Available options: ${releaseFieldOptions.map(o => o.name).join(', ')}`);
 
-                      await github.rest.issues.createComment({
-                        owner,
-                        repo,
-                        issue_number: issueNumber,
-                        body: `⚠️ **Release Automation Error**: Cannot set Release to "${expectedReleaseValue}" - this option does not exist in the project.\n\nAvailable options: ${releaseFieldOptions.map(o => o.name).join(', ')}\n\nPlease add "${expectedReleaseValue}" as an option to the Release field in your project.`
-                      });
-                      errorCount++;
-                      continue;
-                    }
-
-                    console.log(`  Using option ID: ${option.id} for "${expectedReleaseValue}"`);
-
-                    const updateMutation = `
-                      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-                        updateProjectV2ItemFieldValue(
-                          input: {
-                            projectId: $projectId
-                            itemId: $itemId
-                            fieldId: $fieldId
-                            value: { singleSelectOptionId: $optionId }
-                          }
-                        ) {
-                          projectV2Item {
-                            id
-                          }
-                        }
-                      }
-                    `;
-
-                    await github.graphql(updateMutation, {
-                      projectId: TARGET_PROJECT_ID,
-                      itemId: itemId,
-                      fieldId: releaseFieldId,
-                      optionId: option.id
+                    await github.rest.issues.createComment({
+                      owner,
+                      repo,
+                      issue_number: issueNumber,
+                      body: `⚠️ **Release Automation Error**: Cannot set Release to "${expectedReleaseValue}" - this option does not exist in the project.\n\nAvailable options: ${releaseFieldOptions.map(o => o.name).join(', ')}\n\nPlease add "${expectedReleaseValue}" as an option to the Release field in your project.`
                     });
-                  } else {
-                    // For text fields, use text value
-                    const updateMutation = `
-                      mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: String!) {
-                        updateProjectV2ItemFieldValue(
-                          input: {
-                            projectId: $projectId
-                            itemId: $itemId
-                            fieldId: $fieldId
-                            value: { text: $value }
-                          }
-                        ) {
-                          projectV2Item {
-                            id
-                          }
-                        }
-                      }
-                    `;
-
-                    await github.graphql(updateMutation, {
-                      projectId: TARGET_PROJECT_ID,
-                      itemId: itemId,
-                      fieldId: releaseFieldId,
-                      value: expectedReleaseValue
-                    });
+                    errorCount++;
+                    continue;
                   }
+
+                  console.log(`  Using option ID: ${option.id} for "${expectedReleaseValue}"`);
+
+                  // Update the Release field with the single select option ID
+                  const updateMutation = `
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                      updateProjectV2ItemFieldValue(
+                        input: {
+                          projectId: $projectId
+                          itemId: $itemId
+                          fieldId: $fieldId
+                          value: { singleSelectOptionId: $optionId }
+                        }
+                      ) {
+                        projectV2Item {
+                          id
+                        }
+                      }
+                    }
+                  `;
+
+                  await github.graphql(updateMutation, {
+                    projectId: TARGET_PROJECT_ID,
+                    itemId: itemId,
+                    fieldId: releaseFieldId,
+                    optionId: option.id
+                  });
 
                   console.log(`  ✓ Successfully updated Release field to "${expectedReleaseValue}"`);
                   updatedCount++;

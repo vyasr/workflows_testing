@@ -72,13 +72,12 @@ Your GitHub Project must have the following fields:
    - Options: `0`, `1`, `2`, `3`, etc.
    - Used to determine release assignment for issues
 
-2. **Release** (Text field or Single select field)
+2. **Release** (Single select field)
    - Will be automatically populated by workflows
-   - Values: Version numbers (e.g., `25.12`) or `Backlog`
-   - **If using Single select**: Make sure to add options for:
+   - Must include options for:
      - Current and future version numbers (e.g., `25.12`, `25.11`, etc.)
-     - `Backlog` (capitalized)
-     - The workflows will warn you if an option is missing
+     - `Backlog` (capitalized exactly as shown)
+   - The workflows will warn you via comments if an option is missing
 
 #### Step 4: Add Issues/PRs to Project
 
