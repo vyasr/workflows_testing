@@ -3,7 +3,7 @@ name: Issue Release Field Scheduled Sync
 on:
   schedule:
     # Run every 10 minutes
-    - cron: '*/10 * * * *'
+    - cron: '*/2 * * * *'
   # Allow manual triggering for testing
   workflow_dispatch:
 
