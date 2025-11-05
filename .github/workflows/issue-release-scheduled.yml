@@ -3,7 +3,6 @@ name: Issue Release Field Scheduled Sync
 on:
   schedule:
     - cron: '0 * * * *'
-  # Allow manual triggering for testing
   workflow_dispatch:
 
 jobs:
