@@ -116,7 +116,6 @@ jobs:
 
                 // Skip if not the target project
                 if (projectId !== TARGET_PROJECT_ID) {
-                  console.log(`Skipping project: ${projectTitle} (ID: ${projectId})`);
                   continue;
                 }
 
@@ -293,14 +292,6 @@ jobs:
                 }
 
                 console.log(`Successfully updated Release field to "${releaseValue}" in project "${projectTitle}"`);
-
-                // Add a success comment
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: issueNumber,
-                  body: `✅ **Release Automation**: Release field automatically set to **${releaseValue}** based on Priority **${priorityValue}** in project "${projectTitle}".`
-                });
               }
 
             } catch (error) {
