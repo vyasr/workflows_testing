@@ -18,6 +18,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Restore priority cache
+        id: cache-priority
+        uses: actions/cache@v4
+        with:
+          path: .github/priority-cache.json
+          key: priority-cache-${{ github.run_id }}
+          restore-keys: |
+            priority-cache-
+
       - name: Sync release fields for all project issues
         uses: actions/github-script@v7
         with:
@@ -25,12 +34,28 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const fs = require('fs');
+            const path = require('path');
 
             console.log('Starting scheduled release field sync...');
 
             try {
+              // Load previous priority cache
+              const cacheFile = '.github/priority-cache.json';
+              let previousPriorities = {};
+
+              if (fs.existsSync(cacheFile)) {
+                const cacheContent = fs.readFileSync(cacheFile, 'utf8');
+                previousPriorities = JSON.parse(cacheContent);
+                console.log(`Loaded ${Object.keys(previousPriorities).length} cached priority values`);
+              } else {
+                console.log('No previous priority cache found, treating all as new');
+              }
+
+              // Current priorities (will be saved at the end)
+              const currentPriorities = {};
+
               // Read VERSION file to get current release
-              const fs = require('fs');
               const versionContent = fs.readFileSync('VERSION', 'utf8').trim();
               const versionParts = versionContent.split('.');
               const currentRelease = `${versionParts[0]}.${versionParts[1]}`;
@@ -184,11 +209,26 @@ jobs:
                       continue;
                     }
 
+                    // Store current priority for this issue
+                    const cacheKey = `${projectId}:${issueNumber}`;
+                    currentPriorities[cacheKey] = priorityValue;
+
                     // Skip if no Release field
                     if (!releaseFieldId) {
                       console.log(`    No Release field found in project, skipping`);
                       continue;
                     }
+
+                    // Check if Priority has changed since last run
+                    const previousPriority = previousPriorities[cacheKey];
+                    const priorityChanged = previousPriority !== priorityValue;
+
+                    if (!priorityChanged) {
+                      console.log(`    Priority unchanged (${priorityValue}), skipping Release update (preserving manual changes)`);
+                      continue;
+                    }
+
+                    console.log(`    Priority changed: "${previousPriority || '(new)'}" → "${priorityValue}"`);
 
                     // Determine what the release value should be based on priority
                     let expectedReleaseValue;
@@ -201,13 +241,7 @@ jobs:
                       continue;
                     }
 
-                    // Check if update is needed
-                    if (currentReleaseValue === expectedReleaseValue) {
-                      console.log(`    Release field already correct (${expectedReleaseValue}), no update needed`);
-                      continue;
-                    }
-
-                    console.log(`    Release field needs update: "${currentReleaseValue}" → "${expectedReleaseValue}"`);
+                    console.log(`    Updating Release field to: "${expectedReleaseValue}"`);
 
                     // Update the Release field
                     const updateMutation = `
@@ -252,6 +286,14 @@ jobs:
                   // Continue with next issue rather than failing the entire workflow
                 }
               }
+
+              // Save current priorities cache for next run
+              const cacheDir = '.github';
+              if (!fs.existsSync(cacheDir)) {
+                fs.mkdirSync(cacheDir, { recursive: true });
+              }
+              fs.writeFileSync(cacheFile, JSON.stringify(currentPriorities, null, 2));
+              console.log(`\nSaved ${Object.keys(currentPriorities).length} priority values to cache`);
 
               // Summary
               console.log('\n=== Sync Summary ===');
