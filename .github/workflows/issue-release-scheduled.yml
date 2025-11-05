@@ -175,12 +175,7 @@ jobs:
                   continue;
                 }
 
-                // Skip pull requests (they have their own workflow)
-                if (content.__typename === 'PullRequest') {
-                  continue;
-                }
-
-                // Only process issues
+                // Only process issues (skip PRs, draft issues, etc.)
                 if (content.__typename !== 'Issue') {
                   continue;
                 }
